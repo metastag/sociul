@@ -80,8 +80,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	// Client Ip is used to track failed login attempts per ip
+	clientIp := c.ClientIP()
+
 	// Call service layer
-	refreshToken, accessToken, err := h.service.Login(c.Request.Context(), request)
+	refreshToken, accessToken, err := h.service.Login(c.Request.Context(), request, clientIp)
 	if err != nil {
 		sentinel.WriteResp(c, err)
 		return

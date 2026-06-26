@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,12 +58,37 @@ func (s *AuthService) generateAccessToken(id uuid.UUID) (string, error) {
 	return tokenString, nil
 }
 
+// Increment failed login attempts count
+func (s *AuthService) incrementLoginAttempts(ctx context.Context, key string) {
+	err := s.cache.Incr(ctx, key)
+	if err != nil {
+		log.Println("Error in Login() Incr() call - ", err)
+	}
+}
+
+// Check if login attempts exceed limit
+func (s *AuthService) checkLoginAttempts(ctx context.Context, key string) error {
+	attempts, err := s.cache.Fetch(ctx, key)
+
+	// If cache miss, then no login attempts made yet, so dont treat as error
+	if err != nil && err != sentinel.ErrCacheMiss {
+		log.Println("Error in Login() Fetch() call - ", err)
+		return sentinel.ErrInternal
+	}
+
+	loginAttempts, _ := strconv.Atoi(attempts)
+	if loginAttempts > 4 {
+		return sentinel.ErrRateLimit
+	}
+	return nil
+}
+
 // Verify jwt token and return user id claim
 func (s *AuthService) ValidateJwt(tokenString string) (uuid.UUID, error) {
 	// Verify jwt token string
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		return []byte(s.secret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 
 	if err != nil || !token.Valid {
 		return uuid.Nil, sentinel.ErrInvalidToken
@@ -152,7 +179,7 @@ func (s *AuthService) SignUp(ctx context.Context, request models.SignUpRequest) 
 	return refreshToken, accessToken, nil
 }
 
-func (s *AuthService) Login(ctx context.Context, request models.LoginRequest) (string, string, error) {
+func (s *AuthService) Login(ctx context.Context, request models.LoginRequest, clientIp string) (string, string, error) {
 	// Normalize Input
 	request = utils.LoginNormalize(request)
 
@@ -162,9 +189,17 @@ func (s *AuthService) Login(ctx context.Context, request models.LoginRequest) (s
 		return "", "", err
 	}
 
+	// Check if login attempts exceed limit
+	key := fmt.Sprintf("failed-login-attempts:%s:%s", request.Username, clientIp)
+	err = s.checkLoginAttempts(ctx, key)
+	if err != nil {
+		return "", "", err
+	}
+
 	// Retrieve password and uuid of username
 	id, password, err := s.repo.GetUserCreds(ctx, request.Username)
 	if err == sentinel.ErrUserNotFound {
+		s.incrementLoginAttempts(ctx, key) // Increase failed login attempts count
 		return "", "", err
 	} else if err != nil {
 		log.Println("Error in Login() GetUserCreds() call - ", err)
@@ -174,6 +209,7 @@ func (s *AuthService) Login(ctx context.Context, request models.LoginRequest) (s
 	// Compare hashed passwords
 	err = bcrypt.CompareHashAndPassword([]byte(password), []byte(request.Password))
 	if err != nil {
+		s.incrementLoginAttempts(ctx, key) // Increase failed login attempts count
 		return "", "", sentinel.ErrWrongPassword
 	}
 
@@ -185,7 +221,7 @@ func (s *AuthService) Login(ctx context.Context, request models.LoginRequest) (s
 	}
 
 	// Store refresh token -> uuid in cache
-	key := "refresh-token:" + refreshToken
+	key = "refresh-token:" + refreshToken
 	err = s.cache.Store(ctx, key, id.String(), 240*time.Hour)
 
 	// Generate access token (short ttl)

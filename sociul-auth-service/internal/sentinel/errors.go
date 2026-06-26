@@ -1,26 +1,87 @@
 package sentinel
 
-import "errors"
+import "net/http"
+
+type AppError struct {
+	Code    int
+	Message string
+	Wrapped error
+}
+
+func (e *AppError) Error() string {
+	return e.Message
+}
+
+func (e *AppError) Unwrap() error {
+	return e.Wrapped
+}
+
+func NewAppError(code int, message string, wrapped error) *AppError {
+	return &AppError{Code: code, Message: message, Wrapped: wrapped}
+}
 
 var (
 	// Auth errors
-	ErrUnauthorized = errors.New("unauthorized")
-	ErrInvalidToken = errors.New("invalid token")
+	ErrUnauthorized = &AppError{
+		Code:    http.StatusUnauthorized,
+		Message: "unauthorized",
+	}
+	ErrInvalidToken = &AppError{
+		Code:    http.StatusBadRequest,
+		Message: "token expired, please log in again",
+	}
+	ErrRateLimit = &AppError{
+		Code:    http.StatusBadRequest,
+		Message: "too many login attempts, try again later",
+	}
 
 	// Otp/token cache errors
-	ErrCacheMiss = errors.New("cache miss")
-	ErrWrongOtp  = errors.New("wrong otp")
+	ErrCacheMiss = &AppError{
+		Code:    http.StatusBadRequest,
+		Message: "otp or token expired, please try again",
+	}
+	ErrWrongOtp = &AppError{
+		Code:    http.StatusBadRequest,
+		Message: "invalid otp or token",
+	}
 
 	// Username, password, email errors
-	ErrUserNotFound          = errors.New("user not found")
-	ErrInvalidUsername       = errors.New("username length not in 5-255 characters")
-	ErrUsernameSpecial       = errors.New("Username contains special characters")
-	ErrUsernameAlreadyExists = errors.New("A user with this username already exists")
-	ErrInvalidPassword       = errors.New("password length not in 8-70 characters")
-	ErrWrongPassword         = errors.New("wrong password")
-	ErrInvalidEmail          = errors.New("email length not in 7-255 characters")
-	ErrEmailPattern          = errors.New("invalid email format")
+	ErrUserNotFound = &AppError{
+		Code:    http.StatusNotFound,
+		Message: "invalid username or password",
+	}
+	ErrInvalidUsername = &AppError{
+		Code:    http.StatusBadRequest,
+		Message: "username must be between 5 and 255 characters long",
+	}
+	ErrUsernameSpecial = &AppError{
+		Code:    http.StatusBadRequest,
+		Message: "username must not contain special characters",
+	}
+	ErrUsernameAlreadyExists = &AppError{
+		Code:    http.StatusConflict,
+		Message: "username already exists",
+	}
+	ErrInvalidPassword = &AppError{
+		Code:    http.StatusBadRequest,
+		Message: "password must be between 8 and 70 characters long",
+	}
+	ErrWrongPassword = &AppError{
+		Code:    http.StatusBadRequest,
+		Message: "invalid username or password",
+	}
+	ErrInvalidEmail = &AppError{
+		Code:    http.StatusBadRequest,
+		Message: "email must be between 7 and 255 characters long",
+	}
+	ErrEmailPattern = &AppError{
+		Code:    http.StatusBadRequest,
+		Message: "invalid email format, try again",
+	}
 
 	// Generic internal server error
-	ErrInternal = errors.New("internal server error")
+	ErrInternal = &AppError{
+		Code:    http.StatusInternalServerError,
+		Message: "internal server error",
+	}
 )

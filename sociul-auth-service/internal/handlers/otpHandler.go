@@ -47,7 +47,7 @@ func (h *OtpHandler) VerifyEmailOtp(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "otp sent"})
+	c.JSON(http.StatusOK, gin.H{"message": "email verified successfully"})
 }
 
 func (h *OtpHandler) SendResetOtp(c *gin.Context) {

@@ -33,6 +33,20 @@ func (r *AuthRepository) UserExists(ctx context.Context, username string) (bool,
 	return true, nil
 }
 
+// Check if an email exists
+func (r *AuthRepository) EmailExists(ctx context.Context, email string) (bool, error) {
+	sqlQuery := "SELECT 1 FROM users WHERE email=$1"
+	var result string
+
+	err := r.pool.QueryRow(ctx, sqlQuery, email).Scan(&result)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Creates a user in the database
 func (r *AuthRepository) CreateUser(ctx context.Context, user models.User) error {
 	sqlQuery := "INSERT INTO users (id, username, password, email) VALUES ($1, $2, $3, $4)"

@@ -16,13 +16,14 @@ import (
 )
 
 type OtpService struct {
-	repo  *repository.AuthRepository
-	cache *repository.Cache
-	mg    *mailgun.Client
+	repo     *repository.AuthRepository
+	cache    *repository.Cache
+	mg       *mailgun.Client
+	mgDomain string
 }
 
-func NewOtpService(repo *repository.AuthRepository, cache *repository.Cache, mg *mailgun.Client) *OtpService {
-	return &OtpService{repo: repo, cache: cache, mg: mg}
+func NewOtpService(repo *repository.AuthRepository, cache *repository.Cache, mg *mailgun.Client, mgDomain string) *OtpService {
+	return &OtpService{repo: repo, cache: cache, mg: mg, mgDomain: mgDomain}
 }
 
 // Create a random 6-digit otp
@@ -51,14 +52,14 @@ func createResetToken() (string, error) {
 }
 
 // Send email to recipient with 10-seconds timeout
-func (s *OtpService) sendEmail(recipient, otp string) error {
-	sender := "noreply@sociul.com"
+func (s *OtpService) sendEmail(ctx context.Context, recipient, otp string) error {
+	sender := "noreply@" + s.mgDomain
 	subject := "Sociul Verification Code"
 	body := "Your OTP is " + otp
 
-	message := mailgun.NewMessage("", sender, subject, body, recipient)
+	message := mailgun.NewMessage(s.mgDomain, sender, subject, body, recipient)
 
-	emailCtx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	emailCtx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
 	resp, err := s.mg.Send(emailCtx, message)
@@ -71,6 +72,16 @@ func (s *OtpService) sendEmail(recipient, otp string) error {
 }
 
 func (s *OtpService) SendEmailOtp(ctx context.Context, request models.SendOtpRequest) error {
+	// Check if email exists in db
+	exists, err := s.repo.EmailExists(ctx, request.Email)
+	if err != nil {
+		log.Println("Error in SendEmailOtp() EmailExists() call - ", err)
+		return sentinel.ErrInternal
+	}
+	if !exists {
+		return nil
+	}
+
 	// Create a 6-digit otp
 	otp, err := createOtp()
 	if err != nil {
@@ -87,7 +98,7 @@ func (s *OtpService) SendEmailOtp(ctx context.Context, request models.SendOtpReq
 	}
 
 	// Send otp email to user
-	err = s.sendEmail(request.Email, otp)
+	err = s.sendEmail(ctx, request.Email, otp)
 	if err != nil {
 		log.Println("Error in SendEmailOtp() sendEmail() - ", err)
 		return sentinel.ErrInternal
@@ -131,6 +142,16 @@ func (s *OtpService) VerifyEmailOtp(ctx context.Context, request models.VerifyOt
 }
 
 func (s *OtpService) SendResetOtp(ctx context.Context, request models.SendOtpRequest) error {
+	// Check if email exists in db
+	exists, err := s.repo.EmailExists(ctx, request.Email)
+	if err != nil {
+		log.Println("Error in SendEmailOtp() EmailExists() call - ", err)
+		return sentinel.ErrInternal
+	}
+	if !exists {
+		return nil
+	}
+
 	// Create a 6-digit otp
 	otp, err := createOtp()
 	if err != nil {
@@ -147,7 +168,7 @@ func (s *OtpService) SendResetOtp(ctx context.Context, request models.SendOtpReq
 	}
 
 	// Send otp email to user
-	err = s.sendEmail(request.Email, otp)
+	err = s.sendEmail(ctx, request.Email, otp)
 	if err != nil {
 		log.Println("Error in SendResetOtp() sendEmail() - ", err)
 		return sentinel.ErrInternal
@@ -158,7 +179,7 @@ func (s *OtpService) SendResetOtp(ctx context.Context, request models.SendOtpReq
 
 func (s *OtpService) VerifyResetOtp(ctx context.Context, request models.VerifyOtpRequest) (string, error) {
 	// Fetch otp from cache
-	key := "otp:" + request.Email + ":verify"
+	key := "otp:" + request.Email + ":reset"
 	otp, err := s.cache.Fetch(ctx, key)
 	if err == sentinel.ErrCacheMiss {
 		return "", err
@@ -174,7 +195,7 @@ func (s *OtpService) VerifyResetOtp(ctx context.Context, request models.VerifyOt
 	}
 
 	// Delete otp from cache
-	err = s.cache.Delete(ctx, request.Email)
+	err = s.cache.Delete(ctx, key)
 	if err != nil {
 		log.Println("Error in VerifyResetOtp() cache Delete() - ", err)
 		return "", sentinel.ErrInternal

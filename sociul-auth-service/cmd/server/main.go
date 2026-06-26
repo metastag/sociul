@@ -4,6 +4,9 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"sociul-auth-service/internal/config"
@@ -49,7 +52,7 @@ func main() {
 
 	// Initialize services
 	authService := service.NewAuthService(authRepo, cache, cfg.JwtKey)
-	otpService := service.NewOtpService(authRepo, cache, mg)
+	otpService := service.NewOtpService(authRepo, cache, mg, cfg.MailgunDomain)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService)
@@ -91,6 +94,32 @@ func main() {
 		IdleTimeout:  15 * time.Second,
 	}
 
-	log.Println("Starting the server on port 8080")
-	srv.ListenAndServe()
+	// Start server
+	go func() {
+		log.Println("Starting the server on port 8080")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit // block here until a signal arrives
+
+	log.Println("Shutting down server...")
+
+	// Give in-flight requests up to 30 seconds to complete
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	// Close redis and db connections
+	redisCache.Close()
+	pool.Close()
+
+	log.Println("Server stopped.")
 }

@@ -33,3 +33,16 @@ func (r *Cache) Fetch(ctx context.Context, key string) (string, error) {
 func (r *Cache) Delete(ctx context.Context, key string) error {
 	return r.redisCache.Del(ctx, key).Err()
 }
+
+func (r *Cache) Incr(ctx context.Context, key string) error {
+	value, err := r.redisCache.Incr(ctx, key).Result()
+	if err != nil {
+		return err
+	}
+
+	// Set a 15-minute ttl
+	if value == 1 {
+		return r.redisCache.Expire(ctx, key, 15*time.Minute).Err()
+	}
+	return nil
+}
